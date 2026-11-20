@@ -1,0 +1,9 @@
+* text=auto eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.pl text eol=lf
+uv.lock text eol=lf
+src/adas_mcp/swagger/adas-openapi.json text eol=lf

@@ -1,0 +1,39 @@
+# Public-repo hygiene (CLAUDE.md "Public-repo hygiene") for the lines a pull request adds. The reusable
+# ai-dial-ci workflows do not cover it. Hits are reported as warnings to judge, not failures: quoting a
+# forbidden word as a rule or an example is legitimate. Only a script error fails the job.
+name: Hygiene check
+
+on:
+  pull_request:
+    branches: [development, release-*]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  hygiene-sweep:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Sweep added lines
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set +e
+          perl scripts/hygiene-sweep.pl "origin/$BASE_REF" > hits.txt
+          status=$?
+          set -e
+          while IFS= read -r hit; do
+            file="${hit%%:*}"; rest="${hit#*:}"; line="${rest%%:*}"
+            echo "::warning file=${file},line=${line},title=Hygiene::${rest#*: }"
+          done < hits.txt
+          if [ "$status" -eq 1 ]; then
+            echo "Hygiene hits to judge: $(wc -l < hits.txt). See CLAUDE.md \"Public-repo hygiene\"." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          [ "$status" -le 1 ]

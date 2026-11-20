@@ -1,0 +1,52 @@
+# The Dockerfile copies only pyproject.toml, uv.lock, src/, README.md and LICENSE. Everything below is
+# excluded from the build context so nothing else can reach a layer.
+
+# VCS and CI
+.git
+.gitattributes
+.github
+
+# Python environments, caches and build output
+.venv/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.uv-cache/
+build/
+dist/
+test-results/
+
+# IDE and editor configuration
+.idea
+.vscode/
+*.swp
+*~
+.DS_Store
+**/.DS_Store
+
+# Local credentials and secrets
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.p12
+*.crt
+
+# Logs and temporary files
+*.log
+tmp/
+*.tmp
+
+# Agent, docs, tests and local tooling not needed by the image
+.claude
+CLAUDE.md
+docs/
+tests/
+Makefile
+scripts/
+trivy.yaml
+*.local.md

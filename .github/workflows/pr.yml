@@ -1,0 +1,24 @@
+name: PR Workflow
+
+on:
+  pull_request:
+    branches: [development, release-*]
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  run_tests:
+    uses: epam/ai-dial-ci/.github/workflows/python_docker_pr.yml@4.13.2
+    secrets: inherit
+    with:
+      platforms: "linux/amd64,linux/arm64"
+      python-version: "3.11"
+      python-package-manager: "uv"
+      trivy-severity: "CRITICAL,HIGH,MEDIUM,LOW"
+      trivy-severity-for-sarif: "CRITICAL,HIGH,MEDIUM,LOW"

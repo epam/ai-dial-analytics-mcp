@@ -1,0 +1,83 @@
+[project]
+name = "adas-mcp"
+# Placeholder: the release workflow sets the real version from the release branch and tag.
+version = "0.0.0"
+description = "MCP server exposing the Analytics Data Access Service (ADAS) REST API to AI agents."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "EPAM Systems, Inc." }]
+keywords = ["mcp", "model-context-protocol", "dial", "analytics", "adas", "clickhouse"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Database :: Front-Ends",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.11"
+dependencies = [
+    # Pinned below 2.0: this server is written against the 1.x FastMCP API
+    # (`from mcp.server.fastmcp import Context, FastMCP`), which mcp 2.0.0
+    # removed in a package restructure. Without the ceiling a fresh resolve
+    # (`uv lock --upgrade`, or installing the package outside the lock)
+    # installs 2.x and the server fails at import. Lift it only alongside a
+    # port to 2.x.
+    "mcp[cli]>=1.2,<2",
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "opentelemetry-api>=1.45.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/epam/ai-dial-analytics-mcp"
+Repository = "https://github.com/epam/ai-dial-analytics-mcp"
+Issues = "https://github.com/epam/ai-dial-analytics-mcp/issues"
+Documentation = "https://github.com/epam/ai-dial-analytics-mcp/tree/development/docs"
+
+[project.scripts]
+adas-mcp = "adas_mcp.__main__:main"
+
+[project.optional-dependencies]
+otel = [
+    "opentelemetry-distro>=0.66b2",
+    "opentelemetry-exporter-otlp>=1.45.2",
+    "opentelemetry-exporter-prometheus>=0.66b2",
+    "opentelemetry-instrumentation-httpx>=0.66b2",
+    "opentelemetry-instrumentation-logging>=0.66b2",
+    "opentelemetry-sdk>=1.45.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/adas_mcp"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+    "anyio>=4.0",
+    "ruff>=0.6",
+    # The tests exercise the telemetry module, so the dev environment always
+    # carries the `otel` extra; a plain install still does not.
+    "adas-mcp[otel]",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+# Line length is the formatter's call; long docstring lines are agent-facing prose.
+ignore = ["E501"]
