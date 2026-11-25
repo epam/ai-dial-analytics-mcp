@@ -7,7 +7,7 @@ from .telemetry import InstrumentedFastMCP
 from .tools import register_all
 
 _HOST = os.environ.get("FASTMCP_HOST", "127.0.0.1")
-_PORT = int(os.environ.get("FASTMCP_PORT", "8000"))
+_PORT = int(os.environ.get("FASTMCP_PORT", "5000"))
 
 # Instrumented unconditionally: it speaks only the OpenTelemetry API, which is a
 # no-op until the SDK is configured (`opentelemetry-instrument`, see telemetry).

@@ -14,7 +14,7 @@ The published image can be deployed directly; no extra wrapping is needed. The s
 | Image               | `ghcr.io/epam/ai-dial-analytics-mcp:<version>`             |
 | Command / args      | image default: `adas-mcp --transport http`, so no override |
 | Transport           | MCP streamable HTTP                                        |
-| Container port      | `8000`                                                     |
+| Container port      | `5000`                                                     |
 | Endpoint path       | `/mcp`                                                     |
 | CPU / memory        | 0.5 CPU, 1 GiB (requests = limits)                         |
 | Replicas            | 1                                                          |
@@ -51,7 +51,7 @@ spec:
         - name: adas-mcp
           image: ghcr.io/epam/ai-dial-analytics-mcp:<version>
           ports:
-            - containerPort: 8000
+            - containerPort: 5000
           env:
             - name: ADAS_BASE_URL
               value: "https://<adas-backend-host>"
@@ -61,9 +61,9 @@ spec:
             requests: { cpu: 500m, memory: 1Gi }
             limits:   { cpu: 500m, memory: 1Gi }
           readinessProbe:
-            tcpSocket: { port: 8000 }
+            tcpSocket: { port: 5000 }
           livenessProbe:
-            tcpSocket: { port: 8000 }
+            tcpSocket: { port: 5000 }
 ---
 apiVersion: v1
 kind: Service
@@ -73,14 +73,14 @@ spec:
   selector: { app: adas-mcp }
   ports:
     - port: 80
-      targetPort: 8000
+      targetPort: 5000
 ```
 
 Notes:
 
 - **Probes:** there is no HTTP health endpoint, so use TCP probes. Do not send an HTTP GET to `/mcp`: it is not a plain GET endpoint and the probe would fail.
 - **Replicas:** keep `replicas: 1`. FastMCP keeps per-client sessions (`Mcp-Session-Id`) in memory and adas-mcp doesn't switch to stateless mode.
-- **Do not set:** a `command`/`args` override, or `FASTMCP_HOST`/`FASTMCP_PORT`. The image already sets these to `0.0.0.0:8000`.
+- **Do not set:** a `command`/`args` override, or `FASTMCP_HOST`/`FASTMCP_PORT`. The image already sets these to `0.0.0.0:5000`.
 - **Knative instead:** a Knative Service works too. It is not required.
 
 ### 3. Optional env vars
@@ -144,12 +144,12 @@ Notes:
 
 ## Verification
 
-1. Check the pod is `Running`/`Ready` and its logs show the server listening on `0.0.0.0:8000`.
+1. Check the pod is `Running`/`Ready` and its logs show the server listening on `0.0.0.0:5000`.
 2. Port-forward and send an MCP `initialize`:
 
    ```bash
-   kubectl port-forward svc/adas-mcp 8000:80
-   curl -s http://localhost:8000/mcp \
+   kubectl port-forward svc/adas-mcp 5001:80
+   curl -s http://localhost:5001/mcp \
      -H 'Content-Type: application/json' \
      -H 'Accept: application/json, text/event-stream' \
      -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}'

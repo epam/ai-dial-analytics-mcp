@@ -62,7 +62,7 @@ OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"        # or http/protobuf on :4318
 Locally, without Docker:
 
 ```bash
-ADAS_BASE_URL=http://localhost:5000 \
+ADAS_BASE_URL=http://localhost:5000 FASTMCP_PORT=5001 \
   OTEL_TRACES_EXPORTER=otlp OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=none \
   uv run opentelemetry-instrument adas-mcp --transport http
 ```
