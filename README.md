@@ -80,9 +80,12 @@ ADAS_BASE_URL=http://localhost:5000 ADAS_CAPABILITIES=full uv run adas-mcp --tra
 # plus SQL execution, still without write tools
 ADAS_BASE_URL=http://localhost:5000 ADAS_ENABLE_EXECUTE_SQL=true uv run adas-mcp --transport stdio
 
-# streamable HTTP, served at http://localhost:8000/mcp
-ADAS_BASE_URL=http://localhost:5000 uv run adas-mcp --transport http
+# streamable HTTP, served at http://localhost:5001/mcp
+ADAS_BASE_URL=http://localhost:5000 FASTMCP_PORT=5001 uv run adas-mcp --transport http
 ```
+
+The HTTP transport binds port 5000 by default, the same port a local ADAS listens on. When both
+run on one machine, set `FASTMCP_PORT` to a free port (`5001` above); stdio needs no port.
 
 ### Run with Docker
 
@@ -91,18 +94,21 @@ Released images are published to the GitHub Container Registry and Docker Hub as
 `linux/arm64`:
 
 ```bash
-docker run --rm -p 8000:8000 -e ADAS_BASE_URL=http://<adas-host>:5000 ghcr.io/epam/ai-dial-analytics-mcp:<version>
+docker run --rm -p 5001:5000 -e ADAS_BASE_URL=http://<adas-host>:5000 ghcr.io/epam/ai-dial-analytics-mcp:<version>
 ```
 
 Or build it from this repo:
 
 ```bash
 docker build -t adas-mcp .
-docker run --rm -p 8000:8000 -e ADAS_BASE_URL=http://<adas-host>:5000 adas-mcp
+docker run --rm -p 5001:5000 -e ADAS_BASE_URL=http://<adas-host>:5000 adas-mcp
 ```
 
-The image serves streamable HTTP on port 8000. Inside the container `localhost` is the
-container itself, so point `ADAS_BASE_URL` at a host it can reach.
+The image serves streamable HTTP on port 5000 inside the container; the examples publish it on
+host port 5001 (`http://localhost:5001/mcp`) so it does not collide with a local ADAS on 5000.
+Inside the container `localhost` is the container itself, so point `ADAS_BASE_URL` at a host it
+can reach — for an ADAS running on your machine, `http://host.docker.internal:5000` (on Linux, add
+`--add-host=host.docker.internal:host-gateway`).
 
 ### Build and test
 

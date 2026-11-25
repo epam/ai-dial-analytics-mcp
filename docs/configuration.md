@@ -12,7 +12,7 @@ is read when the first tool call needs it, so the server starts without it.
 | `ADAS_CAPABILITIES` | no | `limited` | `limited` \| `full`. Gates the 16 write-capable tools |
 | `ADAS_ENABLE_EXECUTE_SQL` | no | `false` | Registers `adas_execute_sql`. Independent of `ADAS_CAPABILITIES` |
 | `FASTMCP_HOST` | no | `127.0.0.1` | Bind host (the Docker image sets `0.0.0.0`) |
-| `FASTMCP_PORT` | no | `8000` | Bind port for streamable-http |
+| `FASTMCP_PORT` | no | `5000` | Bind port for streamable-http. ADAS also defaults to `5000`, so set a different port (for example `5001`) when running both locally |
 | `OTEL_*` | no | — | Standard OpenTelemetry configuration. See [observability](observability.md) |
 
 ## Capabilities
@@ -65,7 +65,7 @@ The image built from the [`Dockerfile`](../Dockerfile) sets these defaults:
 
 | Variable | Image default |
 |---|---|
-| `FASTMCP_HOST` / `FASTMCP_PORT` | `0.0.0.0` / `8000` |
+| `FASTMCP_HOST` / `FASTMCP_PORT` | `0.0.0.0` / `5000` |
 | `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER`, `OTEL_LOGS_EXPORTER` | `none` |
 | `OTEL_RESOURCE_ATTRIBUTES` | `service.name=adas-mcp` |
 | `OTEL_EXPORTER_PROMETHEUS_HOST` | `0.0.0.0` |
@@ -88,5 +88,5 @@ The image keeps its attack surface small:
   those packages would only ever show up as scanner findings.
 - The process runs as the unprivileged `app` user (uid/gid `10001`).
 
-It exposes port `8000` (streamable-http) and `9464` (Prometheus, served only when
+It exposes port `5000` (streamable-http) and `9464` (Prometheus, served only when
 `OTEL_METRICS_EXPORTER` includes `prometheus`).

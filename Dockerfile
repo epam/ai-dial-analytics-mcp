@@ -32,7 +32,7 @@ COPY --from=builder --chown=app:app /app /app
 RUN pip uninstall --yes pip setuptools wheel
 ENV PATH="/app/.venv/bin:$PATH" \
     FASTMCP_HOST=0.0.0.0 \
-    FASTMCP_PORT=8000 \
+    FASTMCP_PORT=5000 \
     OTEL_TRACES_EXPORTER=none \
     OTEL_METRICS_EXPORTER=none \
     OTEL_LOGS_EXPORTER=none \
@@ -40,6 +40,6 @@ ENV PATH="/app/.venv/bin:$PATH" \
     OTEL_EXPORTER_PROMETHEUS_HOST=0.0.0.0
 
 USER app
-EXPOSE 8000 9464
+EXPOSE 5000 9464
 ENTRYPOINT ["opentelemetry-instrument", "adas-mcp"]
 CMD ["--transport", "http"]

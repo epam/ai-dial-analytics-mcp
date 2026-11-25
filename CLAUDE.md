@@ -114,7 +114,7 @@ make test                                     # uv run pytest -q (what CI runs)
 
 # Run the server (ADAS_BASE_URL required; credentials optional under SECURITY_MODE=none):
 ADAS_BASE_URL=http://localhost:5000 uv run adas-mcp --transport stdio   # Claude Desktop / Code
-ADAS_BASE_URL=http://localhost:5000 uv run adas-mcp --transport http    # streamable-http sidecar
+ADAS_BASE_URL=http://localhost:5000 FASTMCP_PORT=5001 uv run adas-mcp --transport http   # streamable-http; 5000 is ADAS's port
 ADAS_BASE_URL=http://localhost:5000 ADAS_CAPABILITIES=full uv run adas-mcp --transport stdio
 ADAS_BASE_URL=http://localhost:5000 ADAS_ENABLE_EXECUTE_SQL=true uv run adas-mcp --transport stdio
 
