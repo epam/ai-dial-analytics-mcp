@@ -202,3 +202,19 @@ async def test_delete_returns_ok():
 async def test_delete_requires_id():
     result = await adas_delete_dashboard(ctx=None, dashboard_id="")
     assert result["error"]["code"] == "invalid_argument"
+
+
+async def test_replace_keeps_inline_chart_legend():
+    """A widget's inline chart legend passes through the server-member strip."""
+
+    chart = {"type": "bar", "x_field": "day", "y_field": ["n"], "legend": {}}
+    widget = {**WIDGET, "inline_query": {**WIDGET["inline_query"], "chart": chart}}
+    with respx.mock(assert_all_called=False) as router:
+        route = router.put(f"http://adas.test/v1/dashboards/{DASH_ID}").respond(
+            200, json=DASHBOARD
+        )
+        await adas_replace_dashboard(
+            ctx=None, dashboard_id=DASH_ID, body={**DASHBOARD, "widgets": [widget]}
+        )
+    sent = json.loads(route.calls.last.request.content)
+    assert sent["widgets"][0]["inline_query"]["chart"] == chart

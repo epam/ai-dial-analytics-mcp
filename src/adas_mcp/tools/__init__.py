@@ -42,7 +42,7 @@ def register_all(
     `full` alone does not register it, and it can be turned on under `limited`.
 
     This is a local guardrail, not authorization: ADAS still enforces its own
-    `FULL_ADMIN` / `READ_ONLY_ADMIN` roles under `SECURITY_MODE=oidc`.
+    per-endpoint privileges under `SECURITY_MODE=oidc`.
     """
 
     # Read-only — always available (limited + full).

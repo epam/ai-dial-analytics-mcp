@@ -57,7 +57,7 @@ gives an overview and covers the behavior that spans several tools.
 | pipelines | `adas_create_pipeline` | `POST /v1/pipelines` (`kind`: `aggregate` \| `enrich`) |
 | | `adas_patch_pipeline` | `PATCH /v1/pipelines/{name}` |
 | | `adas_refresh_pipeline` | `POST /v1/pipelines/{name}/refresh` (`aggregate` only) |
-| catalog | `adas_import_catalog` | `POST /v1/catalog/import` (multipart; creates tables without grants, disabled pipelines) |
+| catalog | `adas_import_catalog` | `POST /v1/catalog/import` (multipart; creates disabled pipelines; access only with `include_access`) |
 | saved queries | `adas_create_saved_query` | `POST /v1/saved-queries` |
 | | `adas_replace_saved_query` | `PUT /v1/saved-queries/{id}` (full replace) |
 | | `adas_delete_saved_query` | `DELETE /v1/saved-queries/{id}` |
@@ -215,8 +215,10 @@ back can be edited and sent as is.
 
 A chart is `{type, x_field, y_field, legend}`. `y_field` is an array of series names. A legacy
 single string is accepted and read back as a one-element array. The optional `legend` is
-`{visible, position}`, where `position` is `above`, `right`, `below` or `left`. ADAS stores it as
-sent and does not check it.
+`{visible, position}`, where `position` is `above`, `right`, `below` or `left`. ADAS does not
+check `position` against that list (an unknown value renders as `below`), but a `legend` that is
+not an object, or that carries another member, is a 400. A replace whose chart omits `legend`
+clears it.
 
 Authorization uses ADAS's saved-query privileges (`SAVED_QUERY_READ` / `_WRITE` / `_PUBLISH`),
 not `FULL_ADMIN`. Something the caller may not see is a 404.
@@ -234,9 +236,12 @@ is `FAIL_IF_EXISTS` or `SKIP_IF_EXISTS`, and `OVERWRITE` is refused. Every impor
 starts disabled, so enable each one with `adas_patch_pipeline`.
 
 A component can carry less than its closure. `"dependencies": false` exports a pipeline without
-its inputs, target or enrichments, which must then already exist on the target.
+its inputs, target or enrichments. Each must then be ACTIVE on the target or in the bundle, or the
+import refuses the pipeline. The exception is a missing table that an SQL statement's `FROM`
+reads: the pipeline is still created, with `armable: false`.
 `"access_only": true` exports only a table's access entries, and `"roles": [...]` narrows them to
-the listed roles. Both of those need `include_access`.
+the listed roles. Both of those need `include_access`. With `include_access`, a system table such
+as `dial_usage_log` may be named to export its access.
 
 Access travels only on request. Without `include_access`, the bundle holds no access entries, row
 policies or column policies, and imported tables start ungranted. Grant each source on the target
@@ -248,7 +253,8 @@ entries, system tables included. With `include_access=true` on the import, those
 written last, in one transaction, under either resolution policy. Both sides need `TABLE_GRANT`.
 An import never removes an entry, and role names and row-policy values are copied as they are,
 so review the import preview's `access` before importing. Anything an export cannot carry is
-reported only in the export preview's `access[].left_behind`.
+reported only in the export preview's `access[].left_behind`. Importing with `include_access`
+a bundle exported without it fails validation, because the bundle has no `access` member.
 
 Instance settings do not travel: allow an imported `dial_app_route` pipeline's pair with
 `adas_replace_setting` before arming it. System tables travel by name only, as
@@ -268,11 +274,12 @@ see which blobs failed.
 Some ADAS endpoints are deliberately left out:
 
 - **The pipeline data plane** (`POST /v1/pipelines/{name}/scan`, `/group-rows`, `/materialize`,
-  `/rows`). It is the Enrichment Runner's machine-to-machine API, and the only part of
-  `/v1/pipelines` reachable without `FULL_ADMIN`.
+  `/rows`). It is the Enrichment Runner's machine-to-machine API. Each call is authorized
+  against the tables it touches rather than by a registry privilege, and requires the runner's
+  `Adas-Contract-Version` header.
 - **`POST /v1/pipelines/{name}/trial-input`.** The read behind the Enrichment Runner's dry run.
   It requires the runner's `Adas-Contract-Version` header, so it belongs to the runner, not to
-  an MCP client. `adas_preview_pipeline` covers the same sample.
+  an MCP client. `adas_preview_pipeline` returns the same sample, with values capped.
 - **`DELETE /v1/pipelines/{name}`.** To stop a pipeline, patch it to `{"enabled": false}`.
 
 Others are not in scope yet and still need plain HTTP:

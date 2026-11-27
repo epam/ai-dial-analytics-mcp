@@ -38,9 +38,10 @@ statement, and reaches neither ClickHouse nor any write path to do it. Without i
 with execution disabled would have no SQL tool at all and would have to compose statements
 blind.
 
-Both switches are a local guardrail, not authorization. ADAS still enforces its own
-`FULL_ADMIN` / `READ_ONLY_ADMIN` roles under `SECURITY_MODE=oidc`. **Every** `/v1/pipelines`
-endpoint is `FULL_ADMIN` on the backend, including the GETs.
+Both switches are a local guardrail, not authorization. ADAS still enforces its own privileges
+under `SECURITY_MODE=oidc`, endpoint by endpoint. `FULL_ADMIN` and `READ_ONLY_ADMIN` are bundles
+of those privileges. **Every** wrapped `/v1/pipelines` endpoint needs a registry privilege,
+including the GETs: `REGISTRY_READ` to read, `REGISTRY_ADMIN` to write, preview or refresh.
 
 ## Authentication
 

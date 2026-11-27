@@ -163,3 +163,22 @@ async def test_delete_returns_ok():
 async def test_delete_requires_id():
     result = await adas_delete_saved_query(ctx=None, saved_query_id="")
     assert result["error"]["code"] == "invalid_argument"
+
+
+async def test_replace_keeps_chart_legend():
+    """Stripping server members is top-level only: a nested chart legend survives."""
+
+    chart = {
+        "type": "line",
+        "x_field": "day",
+        "y_field": ["cost"],
+        "legend": {"visible": False, "position": "left"},
+    }
+    with respx.mock(assert_all_called=False) as router:
+        route = router.put(f"http://adas.test/v1/saved-queries/{SQ_ID}").respond(
+            200, json={**SAVED, "chart": chart}
+        )
+        await adas_replace_saved_query(
+            ctx=None, saved_query_id=SQ_ID, body={**SAVED, "chart": chart}
+        )
+    assert json.loads(route.calls.last.request.content)["chart"] == chart

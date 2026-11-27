@@ -119,6 +119,18 @@ async def test_export_omits_include_access_by_default():
     }
 
 
+async def test_export_empty_selection_with_access_keeps_both_members():
+    with respx.mock(assert_all_called=False) as router:
+        route = router.post("http://adas.test/v1/catalog/export").respond(
+            200, json=BUNDLE
+        )
+        await adas_export_catalog(ctx=None, components=[], include_access=True)
+    assert json.loads(route.calls.last.request.content) == {
+        "components": [],
+        "include_access": True,
+    }
+
+
 async def test_export_rejects_unknown_component_type():
     result = await adas_export_catalog(
         ctx=None, components=[{"type": "saved_query", "name": "q"}]
@@ -222,6 +234,25 @@ async def test_import_sends_include_access_as_query_parameter():
         assert json.loads(_parts(request)["file"][1]) == BUNDLE
 
 
+async def test_import_sends_both_flags_together():
+    with respx.mock(assert_all_called=False) as router:
+        route = router.post("http://adas.test/v1/catalog/import").respond(
+            200, json={"import_id": "i1", "outcome": "completed"}
+        )
+        await adas_import_catalog(
+            ctx=None,
+            bundle=BUNDLE,
+            resolution_policy="SKIP_IF_EXISTS",
+            acknowledge_reused_names=True,
+            include_access=True,
+        )
+    assert dict(route.calls.last.request.url.params) == {
+        "resolution_policy": "SKIP_IF_EXISTS",
+        "acknowledge_reused_names": "true",
+        "include_access": "true",
+    }
+
+
 async def test_import_requires_bundle_and_policy():
     assert (
         await adas_import_catalog(
@@ -279,4 +310,5 @@ async def test_import_docstrings_carry_shared_argument_section():
 async def test_export_docstrings_carry_shared_argument_section():
     for tool in (adas_preview_catalog_export, adas_export_catalog):
         assert "access_only" in tool.__doc__
+        assert "include_access" in tool.__doc__
         assert "{args}" not in tool.__doc__

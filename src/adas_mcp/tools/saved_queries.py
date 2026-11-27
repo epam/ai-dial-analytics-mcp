@@ -158,9 +158,10 @@ _BODY_DOC = """
         `{visible, position}`: `visible` a boolean, `position` a string the
         client knows as `above`, `right`, `below` or `left` (stored as sent,
         never checked; an unknown value renders as `below`). A `legend` that
-        is not an object, or that carries any other member, is a 400. Members
-        are optional and never checked against the catalog (they name result
-        columns).
+        is neither an object nor null, whose `visible` or `position` is an
+        object or an array, or that carries any other member, is a 400. A
+        replace whose chart omits `legend` clears it. Members are optional and
+        never checked against the catalog (they name result columns).
 
     The body is validated **without executing it**, by the same translation
     the query surface performs, against the **caller's** view of the catalog:

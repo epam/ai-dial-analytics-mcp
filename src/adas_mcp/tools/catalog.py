@@ -13,7 +13,8 @@ Three of the four tools write nothing and register under `limited`:
 `adas_preview_catalog_import`. Only `adas_import_catalog` creates anything, so
 it alone is `full`-only. The backend authorizes all four on its own: export
 needs `REGISTRY_READ` (plus `TABLE_GET` per table, sensitive clearance per
-table with a sensitive column, and no column hidden by a column policy), both import calls need `TABLE_CREATE` (plus
+table with a sensitive column, and no column hidden by a column policy; a
+pipeline exported with `dependencies: false` checks none of its tables), both import calls need `TABLE_CREATE` (plus
 `TABLE_MODIFY`, `REGISTRY_ADMIN` and `TABLE_SENSITIVE` as the bundle requires).
 Carrying access (`include_access`) additionally needs global `TABLE_GRANT`, on
 export and import alike; an import still needs `TABLE_CREATE` even for a bundle
@@ -102,7 +103,10 @@ _EXPORT_ARGS_DOC = """
         exportable**. A component may narrow what it carries with a selector:
           - `"dependencies": false` (pipeline only) — the pipeline alone, without
             its inputs, target or the enrichments it reads. The import then
-            needs each of them on the target, ACTIVE.
+            needs each of them ACTIVE on the target (or in the bundle), else
+            the pipeline entry is `FAIL`; only a missing table that an SQL
+            statement's `FROM` reads instead leaves it `CREATE` with
+            `armable: false`.
           - `"access_only": true` (table only, needs `include_access`) — only the
             table's access entries, with no definition and nothing connected. The
             import writes them onto the table the target already has.
@@ -118,7 +122,11 @@ _EXPORT_ARGS_DOC = """
         the entry would accept now travels; anything else stays behind, and the
         export preview's `access[].left_behind` is the **only** report of it. A
         column policy naming an enrichment (`<enrichment>.<column>`) pulls that
-        enrichment, and the pipeline that fills it, into the export.
+        enrichment, and the pipeline that fills it, into the export. With it, a
+        system table (e.g. `dial_usage_log`) may be named in `components` to
+        export its access; without it, naming one is a 422.
+    For the exact member list, call `adas_describe_schema` with
+    `type_name="ExportRequest"` (and `"ExportComponent"`).
 """
 
 
@@ -165,8 +173,12 @@ async def adas_preview_catalog_export(
         caller may not get (`not_found`), or a named pipeline that does not
         exist (`unknown_pipeline`).
       - `invalid_argument` (422 `catalog_export_invalid`) — a selection that
-        names, or whose closure reaches, a system table, an OTLP landing table
-        or a pipeline reading one, or a PENDING or FAILED table.
+        names a system table without `include_access`, or that names, or whose
+        closure reaches, an OTLP landing table or a pipeline reading one, or a
+        PENDING or FAILED table. An access-only table and a pipeline exported
+        with `dependencies: false` walk no closure, so they are exempt. A
+        closure that reaches a system table is not an error: the table is
+        listed under `required_system_tables`.
       - `permission_denied` (403 `column_not_entitled`) — a bundle table has
         a column a column policy hides from the caller (checked first, so it
         wins); (403 `sensitive_column_not_entitled`) — a bundle table has a
@@ -261,6 +273,7 @@ async def adas_export_catalog(
       components=[{"type": "pipeline", "name": "turns_rollup"}]
       components=[{"type": "pipeline", "name": "sentiment_enrich", "dependencies": False}]
       components=[{"type": "table", "name": "usage_sentiment"}], include_access=True
+      components=[{"type": "table", "name": "dial_usage_log"}], include_access=True
     """
 
     body = _export_body(components, include_access)
@@ -337,7 +350,11 @@ _IMPORT_ARGS_DOC = """
         `access` entries, per role, onto created, existing and system tables
         alike, never removing one. Needs global `TABLE_GRANT` (and still
         `TABLE_CREATE`, even for a bundle that carries only access). Without it
-        the bundle's `access` member is ignored.
+        the bundle's `access` member is ignored. A bundle exported without
+        `include_access` has no `access` member, and importing it with
+        `include_access` is a `validation_errors` problem (422
+        `catalog_import_invalid` on the import itself). To edit an entry, call
+        `adas_describe_schema` with `type_name="BundleAccessEntry"`.
 
     Each entry under `tables` and `pipelines` is
     `{name, import_action, prev, next, differs, metadata_only, problems[]}`:

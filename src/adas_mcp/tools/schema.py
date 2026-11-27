@@ -61,7 +61,8 @@ async def adas_describe_schema(type_name: str | None = None) -> dict[str, Any]:
     `CreateTableRequest`, `DefineSchemaRequest`, `PatchSchemaRequest`,
     `SavedQueryRequestDto`, `DashboardRequestDto` (with its
     `WidgetRequestDto`, `InlineQueryRequestDto` and `LayoutRequestDto`),
-    `IngestFailureRetryRequest`, `AppRoutesSettingRequestDto` and
+    `IngestFailureRetryRequest`, `ExportRequest` (with its `ExportComponent`),
+    `BundleAccessEntry` (a catalog bundle's access entry), `AppRoutesSettingRequestDto` and
     `SessionsSourceSettingRequestDto`, including which fields are required and which enum values are accepted.
     An `enrich` pipeline's definition lives in the nested `transform` block of
     the pipeline request — `CreateTransformRequest` on `POST`,
@@ -78,7 +79,8 @@ async def adas_describe_schema(type_name: str | None = None) -> dict[str, Any]:
     (`/v1/activities`) and the `revision` snapshot reads, table update/delete
     (`PUT`/`DELETE /v1/tables/{name}`), row writes (`POST
     /v1/tables/{name}/rows`), the OTLP sinks (`/v1/otel/**`), the pipeline
-    data plane (`POST /v1/pipelines/{name}/scan` and friends), and the
+    data plane (`POST /v1/pipelines/{name}/scan` and friends) and its dry-run
+    read (`POST /v1/pipelines/{name}/trial-input`), and the
     structured-query `execute`/`translate` endpoints.
 
     Returns:
