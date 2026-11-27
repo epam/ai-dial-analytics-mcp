@@ -254,6 +254,15 @@ Instance settings do not travel: allow an imported `dial_app_route` pipeline's p
 `adas_replace_setting` before arming it. System tables travel by name only, as
 `required_system_tables`. Bundles are `format_version` 4, which an older ADAS refuses.
 
+## Data-sync failures
+
+Every log blob or day that failed to ingest is kept in a durable failure ledger, whichever path
+hit it (poller, reconciliation, backfill, retry sweep). Transient failures are retried by a
+sweep with backoff, and deterministic ones are parked. `adas_list_data_sync_failures` lists what
+is outstanding, and its `total` is what `adas_retry_data_sync_failures` would requeue with the
+same filters. A backfill status reports `failedBlobs`. Filter the ledger by `backfill_run_id` to
+see which blobs failed.
+
 ## Not wrapped
 
 Some ADAS endpoints are deliberately left out:
