@@ -1,7 +1,7 @@
 [project]
 name = "adas-mcp"
 # Placeholder: the release workflow sets the real version from the release branch and tag.
-version = "0.0.0"
+version = "0.24.0rc0"
 description = "MCP server exposing the Analytics Data Access Service (ADAS) REST API to AI agents."
 readme = "README.md"
 license = "Apache-2.0"
