@@ -17,3 +17,6 @@ build/
 *.local.md
 .uv-cache/
 test-results/
+
+### Release-notes drafts from the release-notes skill (never committed) ###
+/claude/release-notes/
