@@ -213,8 +213,10 @@ against the caller's view of the catalog.
 timestamps, `permissions`, and a saved query's `source` / `generation`), so a document read
 back can be edited and sent as is.
 
-A chart's `y_field` is an array of series names. A legacy single string is accepted and read
-back as a one-element array.
+A chart is `{type, x_field, y_field, legend}`. `y_field` is an array of series names. A legacy
+single string is accepted and read back as a one-element array. The optional `legend` is
+`{visible, position}`, where `position` is `above`, `right`, `below` or `left`. ADAS stores it as
+sent and does not check it.
 
 Authorization uses ADAS's saved-query privileges (`SAVED_QUERY_READ` / `_WRITE` / `_PUBLISH`),
 not `FULL_ADMIN`. Something the caller may not see is a 404.
@@ -227,25 +229,30 @@ Catalog promotion is preview-first on both sides:
 2. On the target, `adas_preview_catalog_import`, then `adas_import_catalog`, passing the
    exported bundle **unchanged** as `bundle`. The tool uploads it as the multipart `file` part.
 
-Import never changes an existing object. `resolution_policy` is `FAIL_IF_EXISTS` or
-`SKIP_IF_EXISTS`, and `OVERWRITE` is refused. Every imported pipeline starts disabled, so
-enable each one with `adas_patch_pipeline`.
+Import never changes an existing object's definition, columns or pipeline. `resolution_policy`
+is `FAIL_IF_EXISTS` or `SKIP_IF_EXISTS`, and `OVERWRITE` is refused. Every imported pipeline
+starts disabled, so enable each one with `adas_patch_pipeline`.
 
-Access never travels. The bundle holds no access entries, row policies or column policies, and
-imported tables start ungranted, so grant each source on the target with
-`PUT /v1/tables/{name}/access?role={role}`, which is not wrapped. An enrichment follows its
-source's read access. Instance settings do not travel either: allow an imported
-`dial_app_route` pipeline's pair with `adas_replace_setting` before arming it. System tables
-travel by name only, as `required_system_tables`.
+A component can carry less than its closure. `"dependencies": false` exports a pipeline without
+its inputs, target or enrichments, which must then already exist on the target.
+`"access_only": true` exports only a table's access entries, and `"roles": [...]` narrows them to
+the listed roles. Both of those need `include_access`.
 
-## Data-sync failures
+Access travels only on request. Without `include_access`, the bundle holds no access entries, row
+policies or column policies, and imported tables start ungranted. Grant each source on the target
+with `PUT /v1/tables/{name}/access?role={role}`, which is not wrapped. An enrichment follows its
+source's read access.
 
-Every log blob or day that failed to ingest is kept in a durable failure ledger, whichever path
-hit it (poller, reconciliation, backfill, retry sweep). Transient failures are retried by a
-sweep with backoff, and deterministic ones are parked. `adas_list_data_sync_failures` lists what
-is outstanding, and its `total` is what `adas_retry_data_sync_failures` would requeue with the
-same filters. A backfill status reports `failedBlobs`. Filter the ledger by `backfill_run_id` to
-see which blobs failed.
+With `include_access: true` on the export, the bundle carries each covered table's per-role
+entries, system tables included. With `include_access=true` on the import, those entries are
+written last, in one transaction, under either resolution policy. Both sides need `TABLE_GRANT`.
+An import never removes an entry, and role names and row-policy values are copied as they are,
+so review the import preview's `access` before importing. Anything an export cannot carry is
+reported only in the export preview's `access[].left_behind`.
+
+Instance settings do not travel: allow an imported `dial_app_route` pipeline's pair with
+`adas_replace_setting` before arming it. System tables travel by name only, as
+`required_system_tables`. Bundles are `format_version` 4, which an older ADAS refuses.
 
 ## Not wrapped
 
@@ -254,6 +261,9 @@ Some ADAS endpoints are deliberately left out:
 - **The pipeline data plane** (`POST /v1/pipelines/{name}/scan`, `/group-rows`, `/materialize`,
   `/rows`). It is the Enrichment Runner's machine-to-machine API, and the only part of
   `/v1/pipelines` reachable without `FULL_ADMIN`.
+- **`POST /v1/pipelines/{name}/trial-input`.** The read behind the Enrichment Runner's dry run.
+  It requires the runner's `Adas-Contract-Version` header, so it belongs to the runner, not to
+  an MCP client. `adas_preview_pipeline` covers the same sample.
 - **`DELETE /v1/pipelines/{name}`.** To stop a pipeline, patch it to `{"enabled": false}`.
 
 Others are not in scope yet and still need plain HTTP:

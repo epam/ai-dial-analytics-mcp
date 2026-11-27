@@ -92,6 +92,9 @@ Deliberately **not** wrapped, and not by omission:
   write-back). These four are also the only `/v1/pipelines` paths `OidcSecurityConfiguration` pins
   as `.authenticated()` rather than `FULL_ADMIN`, authorized per call by the target enrichment's
   WRITE grant.
+- `POST /v1/pipelines/{name}/trial-input` — the read behind the Enrichment Runner's dry run. It
+  requires the runner's `Adas-Contract-Version` header (409 without it), so it is runner-side
+  like the data plane; `adas_preview_pipeline` already serves the same sample to an agent.
 - `POST /v1/queries/execute` (structured-query DSL), `QueryTranslationController`
   (`/v1/queries/translate`, `/translate-sql`), the
   OTLP sinks (`/v1/otel/**`), the audit activity feed (`POST /v1/activities`,

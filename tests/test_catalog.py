@@ -15,9 +15,10 @@ from adas_mcp.tools.catalog import (
 
 BUNDLE = {
     "format": "adas-catalog",
-    "format_version": 1,
+    "format_version": 4,
     "tables": [{"table": {"name": "t", "type": "source"}}],
     "pipelines": [],
+    "access": {"t": {"analytics-viewers": {"privileges": ["get", "read"]}}},
 }
 
 
@@ -71,6 +72,51 @@ async def test_export_without_components_sends_empty_body():
         result = await adas_export_catalog(ctx=None)
     assert result == BUNDLE
     assert json.loads(route.calls.last.request.content) == {}
+
+
+async def test_export_sends_include_access_and_selectors():
+    """Selectors pass through as given; ADAS owns their rules."""
+
+    components = [
+        {"type": "pipeline", "name": "p", "dependencies": False},
+        {"type": "table", "name": "t", "access_only": True, "roles": ["r"]},
+    ]
+    with respx.mock(assert_all_called=False) as router:
+        route = router.post("http://adas.test/v1/catalog/export").respond(
+            200, json=BUNDLE
+        )
+        await adas_export_catalog(ctx=None, components=components, include_access=True)
+    assert json.loads(route.calls.last.request.content) == {
+        "components": components,
+        "include_access": True,
+    }
+
+
+async def test_export_preview_with_access_only_sends_the_flag():
+    preview = {
+        "objects": [],
+        "required_system_tables": [],
+        "skipped": [],
+        "access": [{"table": "t", "roles": ["r"], "left_behind": []}],
+    }
+    with respx.mock(assert_all_called=False) as router:
+        route = router.post("http://adas.test/v1/catalog/export/preview").respond(
+            200, json=preview
+        )
+        result = await adas_preview_catalog_export(ctx=None, include_access=True)
+    assert result == preview
+    assert json.loads(route.calls.last.request.content) == {"include_access": True}
+
+
+async def test_export_omits_include_access_by_default():
+    with respx.mock(assert_all_called=False) as router:
+        route = router.post("http://adas.test/v1/catalog/export").respond(
+            200, json=BUNDLE
+        )
+        await adas_export_catalog(ctx=None, components=[{"type": "table", "name": "t"}])
+    assert json.loads(route.calls.last.request.content) == {
+        "components": [{"type": "table", "name": "t"}]
+    }
 
 
 async def test_export_rejects_unknown_component_type():
@@ -150,6 +196,30 @@ async def test_import_omits_acknowledgement_by_default():
             ctx=None, bundle=BUNDLE, resolution_policy="FAIL_IF_EXISTS"
         )
     assert "acknowledge_reused_names" not in route.calls.last.request.url.params
+    assert "include_access" not in route.calls.last.request.url.params
+
+
+async def test_import_sends_include_access_as_query_parameter():
+    for tool, path in (
+        (adas_preview_catalog_import, "/v1/catalog/import/preview"),
+        (adas_import_catalog, "/v1/catalog/import"),
+    ):
+        with respx.mock(assert_all_called=False) as router:
+            route = router.post(f"http://adas.test{path}").respond(
+                200, json={"access": []}
+            )
+            await tool(
+                ctx=None,
+                bundle=BUNDLE,
+                resolution_policy="SKIP_IF_EXISTS",
+                include_access=True,
+            )
+        request = route.calls.last.request
+        assert dict(request.url.params) == {
+            "resolution_policy": "SKIP_IF_EXISTS",
+            "include_access": "true",
+        }
+        assert json.loads(_parts(request)["file"][1]) == BUNDLE
 
 
 async def test_import_requires_bundle_and_policy():
@@ -202,4 +272,11 @@ async def test_import_invalid_maps_invalid_argument_and_keeps_status():
 async def test_import_docstrings_carry_shared_argument_section():
     for tool in (adas_preview_catalog_import, adas_import_catalog):
         assert "SKIP_IF_EXISTS" in tool.__doc__
+        assert "include_access" in tool.__doc__
+        assert "{args}" not in tool.__doc__
+
+
+async def test_export_docstrings_carry_shared_argument_section():
+    for tool in (adas_preview_catalog_export, adas_export_catalog):
+        assert "access_only" in tool.__doc__
         assert "{args}" not in tool.__doc__

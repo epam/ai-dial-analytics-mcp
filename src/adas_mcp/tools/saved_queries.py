@@ -149,13 +149,18 @@ _BODY_DOC = """
         applied to the body: a body that must move with the clock carries its
         own window (`now() - INTERVAL '7' DAY` in SQL).
       - `result_view` — `table` (default) or `chart`; `chart` —
-        `{type, x_field, y_field}`, stored as sent
+        `{type, x_field, y_field, legend}`, stored as sent
         except that `y_field` is an **array** of result-column names — one
         element is a single-series chart, several are series plotted against
         the one `x_field`, in the order given. A legacy single string is
         accepted and returned as a one-element array; an object, or an array
-        holding an object or an empty array, is a 400. Members are optional
-        and never checked against the catalog (they name result columns).
+        holding an object or an empty array, is a 400. `legend` is
+        `{visible, position}`: `visible` a boolean, `position` a string the
+        client knows as `above`, `right`, `below` or `left` (stored as sent,
+        never checked; an unknown value renders as `below`). A `legend` that
+        is not an object, or that carries any other member, is a 400. Members
+        are optional and never checked against the catalog (they name result
+        columns).
 
     The body is validated **without executing it**, by the same translation
     the query surface performs, against the **caller's** view of the catalog:
@@ -207,7 +212,7 @@ adas_create_saved_query.__doc__ = (
 
     Examples:
       body={"name": "Calls per deployment", "sql": "SELECT deployment, count(*) AS calls FROM dial_usage_log WHERE request_time >= now() - INTERVAL '7' DAY GROUP BY deployment ORDER BY calls DESC", "time": {"mode": "relative", "period": "last_7d"}}
-      body={"name": "Daily cost", "scope": "common", "tag": "Cost", "sql": "SELECT date_trunc('day', request_time) AS day, sum(total_price) AS cost FROM dial_usage_log GROUP BY day ORDER BY day", "result_view": "chart", "chart": {"type": "line", "x_field": "day", "y_field": ["cost"]}}
+      body={"name": "Daily cost", "scope": "common", "tag": "Cost", "sql": "SELECT date_trunc('day', request_time) AS day, sum(total_price) AS cost FROM dial_usage_log GROUP BY day ORDER BY day", "result_view": "chart", "chart": {"type": "line", "x_field": "day", "y_field": ["cost"], "legend": {"visible": True, "position": "below"}}}
     """
 )
 

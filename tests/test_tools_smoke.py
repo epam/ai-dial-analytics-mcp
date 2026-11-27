@@ -183,7 +183,7 @@ async def test_every_endpoint_tool_smoke_calls_backend():
             200, json={"objects": [], "required_system_tables": [], "skipped": []}
         )
         router.post("http://adas.test/v1/catalog/export").respond(
-            200, json={"format": "adas-catalog", "format_version": 1}
+            200, json={"format": "adas-catalog", "format_version": 4}
         )
         router.post("http://adas.test/v1/catalog/import/preview").respond(
             200, json={"tables": [], "pipelines": [], "required_system_tables": []}
