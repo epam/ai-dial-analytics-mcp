@@ -89,9 +89,14 @@ is `ACTIVE` only, each answering 409 on the other's state.
 Deliberately **not** wrapped, and not by omission:
 - The pipeline data plane (`POST /v1/pipelines/{name}/scan`, `/group-rows`, `/materialize`,
   `/rows`) — the Enrichment Runner's machine-to-machine API (cursor paging, batched row
-  write-back). These four are also the only `/v1/pipelines` paths `OidcSecurityConfiguration` pins
-  as `.authenticated()` rather than `FULL_ADMIN`, authorized per call by the target enrichment's
-  WRITE grant.
+  write-back). Unlike the rest of `/v1/pipelines`, these four are authorized per call against
+  the tables they touch (`TABLE_READ` / `TABLE_WRITE`, deferred to the table's grants, so a
+  matching table grant suffices), not by a registry privilege, and they require the runner's
+  `Adas-Contract-Version` header.
+- `POST /v1/pipelines/{name}/trial-input` — the read behind the Enrichment Runner's dry run. It
+  requires the runner's `Adas-Contract-Version` header (409 without it), so it is runner-side
+  like the data plane; `adas_preview_pipeline` already serves the same sample, values capped, to
+  an agent.
 - `POST /v1/queries/execute` (structured-query DSL), `QueryTranslationController`
   (`/v1/queries/translate`, `/translate-sql`), the
   OTLP sinks (`/v1/otel/**`), the audit activity feed (`POST /v1/activities`,
@@ -169,9 +174,10 @@ alone does not register it, and it can be enabled under `limited`. Accepted spel
 runs the same checks with the round trip removed and contacts nothing — so a deployment with
 execution disabled can still get SQL right on the first try.
 
-Both toggles are a **local guardrail, not authorization** — ADAS enforces `FULL_ADMIN` /
-`READ_ONLY_ADMIN` itself under `SECURITY_MODE=oidc`, and note that every `/v1/pipelines` endpoint
-is `FULL_ADMIN` there, including the GETs.
+Both toggles are a **local guardrail, not authorization** — ADAS enforces its own privileges
+itself under `SECURITY_MODE=oidc`, per endpoint (`@RequiresPrivilege`); `FULL_ADMIN` and
+`READ_ONLY_ADMIN` are bundles of them. Every wrapped `/v1/pipelines` endpoint needs a registry
+privilege there: `REGISTRY_READ` for the GETs, `REGISTRY_ADMIN` for writes, preview and refresh.
 
 ### OpenTelemetry (standard zero-code setup)
 There is no project-specific switch and no SDK setup code. `server.py` always builds

@@ -134,9 +134,9 @@ _BODY_DOC = """
             result_view?, chart?}` — `name` required, exactly one body (`sql` in
             the ADAS SQL dialect, or a structured-query DSL `query`),
             `result_view` `table` (default) or `chart`, `chart` `{type,
-            x_field, y_field}` (the saved-query chart model: `y_field` is an
-            array of series, a legacy string read back as a one-element
-            array). An inline query carries **no** `time`, `scope`,
+            x_field, y_field, legend}` (the saved-query chart model:
+            `y_field` is an array of series, a legacy string read back as a
+            one-element array; `legend` is `{visible, position}`). An inline query carries **no** `time`, `scope`,
             `tag`, owner or `generation` (400 naming the member): copying a
             saved query in, copy only those four members. The copy is a
             snapshot and does not follow the saved query afterwards.

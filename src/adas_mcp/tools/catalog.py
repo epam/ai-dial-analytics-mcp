@@ -4,8 +4,8 @@ Moves user tables (identity, columns as stored) and pipelines from one
 ADAS environment to another as a versioned **bundle**: export on the source,
 import on the target. The API is shaped like deployment manager's config
 export/import — the export selection in a JSON body, the import as a multipart
-upload with `resolution_policy` (and `acknowledge_reused_names`) as query
-parameters, and a preview twin for each call — so one admin UI drives both
+upload with `resolution_policy` (and `acknowledge_reused_names`,
+`include_access`) as query parameters, and a preview twin for each call — so one admin UI drives both
 services alike.
 
 Three of the four tools write nothing and register under `limited`:
@@ -13,18 +13,31 @@ Three of the four tools write nothing and register under `limited`:
 `adas_preview_catalog_import`. Only `adas_import_catalog` creates anything, so
 it alone is `full`-only. The backend authorizes all four on its own: export
 needs `REGISTRY_READ` (plus `TABLE_GET` per table, sensitive clearance per
-table with a sensitive column, and no column hidden by a column policy), both import calls need `TABLE_CREATE` (plus
+table with a sensitive column, and no column hidden by a column policy; a
+pipeline exported with `dependencies: false` checks none of its tables), both import calls need `TABLE_CREATE` (plus
 `TABLE_MODIFY`, `REGISTRY_ADMIN` and `TABLE_SENSITIVE` as the bundle requires).
+Carrying access (`include_access`) additionally needs global `TABLE_GRANT`, on
+export and import alike; an import still needs `TABLE_CREATE` even for a bundle
+that carries only access.
 
 What a promotion never does, whatever the tool:
-  - **change an existing object.** `SKIP_IF_EXISTS` keeps it as it is and
-    `FAIL_IF_EXISTS` refuses the import; `OVERWRITE` is refused (422).
-  - **carry or write access.** Access is each environment's own policy: the
-    bundle holds no access entries, row policies or column policies, and every
-    imported table starts ungranted. Grant each source on the target afterwards,
-    one role at a time (`PUT /v1/tables/{name}/access?role={role}`, which this
+  - **change an existing object's definition, columns or pipeline.**
+    `SKIP_IF_EXISTS` keeps it as it is and `FAIL_IF_EXISTS` refuses the import;
+    `OVERWRITE` is refused (422). Only its access entries can change, and only
+    with `include_access`.
+  - **carry access unless asked.** Without `include_access` the bundle holds
+    no access entries, row policies or column policies, and every imported
+    table starts ungranted: grant each source on the target afterwards, one
+    role at a time (`PUT /v1/tables/{name}/access?role={role}`, which this
     server does not wrap); an enrichment follows its source's read access and
-    takes only `write`/`modify` of its own.
+    takes only `write`/`modify` of its own. With `include_access` on the export
+    the bundle carries an `access` member, each covered table's per-role
+    entries (system tables included), and with `include_access` on the import
+    those entries are written last, in one transaction. Role names and
+    row-policy literals are copied as they are and may mean something else on
+    the target, so review the import preview's `access` before importing.
+  - **remove an access entry.** Roles the bundle does not name keep theirs;
+    remove one with `DELETE /v1/tables/{name}/access?role={role}` (not wrapped).
   - **carry instance settings.** `app-routes` and `sessions-source` belong to
     the instance: an imported `dial_app_route` pipeline previews
     `armable: false` naming `app-routes` until its pair is allowed there
@@ -32,7 +45,8 @@ What a promotion never does, whatever the tool:
   - **write a system table.** `dial_usage_log`, `rate_analytics` and
     `dial_usage_log_payload` travel **by name only**, under
     `required_system_tables`: import checks that each exists on the target as
-    an ACTIVE system table, and nothing more.
+    an ACTIVE system table, and writes nothing to it but, under
+    `include_access`, the bundle's access entries for it.
   - **enable a pipeline.** Every imported pipeline lands disabled; arming is a
     separate `adas_patch_pipeline` with `{"enabled": true}`.
   - **carry runner state or data.** Aggregates rebuild from zero once armed,
@@ -55,11 +69,19 @@ from ..errors import MissingAuthError, invalid_argument, structured_error
 _COMPONENT_TYPES = ("table", "pipeline")
 
 
-def _export_body(components: list[dict[str, Any]] | None) -> dict[str, Any]:
-    """Validate the component selection and build the `ExportRequest` body."""
+def _export_body(
+    components: list[dict[str, Any]] | None, include_access: bool
+) -> dict[str, Any]:
+    """Validate the component selection and build the `ExportRequest` body.
 
+    Only `type` and `name` are checked here. The selectors (`dependencies`,
+    `access_only`, `roles`) pass through as given, since ADAS owns their rules.
+    `include_access` is sent only when true, since ADAS defaults it to false.
+    """
+
+    body: dict[str, Any] = {"include_access": True} if include_access else {}
     if components is None:
-        return {}
+        return body
     if not isinstance(components, list):
         return invalid_argument("components must be a list of {type, name} objects")
     for index, component in enumerate(components):
@@ -71,11 +93,47 @@ def _export_body(components: list[dict[str, Any]] | None) -> dict[str, Any]:
             return invalid_argument(
                 f"components[{index}].type must be one of {', '.join(_COMPONENT_TYPES)}"
             )
-    return {"components": components}
+    return {"components": components, **body}
+
+
+_EXPORT_ARGS_DOC = """
+    Arguments:
+      - `components` — the objects to export, each `{"type": "table" |
+        "pipeline", "name": "..."}`. Omitted or empty, it means **everything
+        exportable**. A component may narrow what it carries with a selector:
+          - `"dependencies": false` (pipeline only) — the pipeline alone, without
+            its inputs, target or the enrichments it reads. The import then
+            needs each of them ACTIVE on the target (or in the bundle), else
+            the pipeline entry is `FAIL`; only a missing table that an SQL
+            statement's `FROM` reads instead leaves it `CREATE` with
+            `armable: false`.
+          - `"access_only": true` (table only, needs `include_access`) — only the
+            table's access entries, with no definition and nothing connected. The
+            import writes them onto the table the target already has.
+          - `"roles": ["..."]` (table only, needs `include_access`) — only the
+            listed roles' entries. A role with no entry on the table is a 404.
+        A component that another component's closure reaches travels as that
+        closure decides. A selector on the wrong type, or an empty `roles`, is a
+        400; `access_only` or `roles` without `include_access`, or one object
+        named twice with different selectors, is a 422 `catalog_export_invalid`.
+      - `include_access` — optional, default false; also carry each covered
+        table's access entries (privileges, row policies, column policies),
+        system tables included. Needs global `TABLE_GRANT`. Only what a `PUT` of
+        the entry would accept now travels; anything else stays behind, and the
+        export preview's `access[].left_behind` is the **only** report of it. A
+        column policy naming an enrichment (`<enrichment>.<column>`) pulls that
+        enrichment, and the pipeline that fills it, into the export. With it, a
+        system table (e.g. `dial_usage_log`) may be named in `components` to
+        export its access; without it, naming one is a 422.
+    For the exact member list, call `adas_describe_schema` with
+    `type_name="ExportRequest"` (and `"ExportComponent"`).
+"""
 
 
 async def adas_preview_catalog_export(
-    ctx: Context, components: list[dict[str, Any]] | None = None
+    ctx: Context,
+    components: list[dict[str, Any]] | None = None,
+    include_access: bool = False,
 ) -> dict[str, Any]:
     """List what a catalog export would carry, and why, without the bundle itself.
 
@@ -84,37 +142,53 @@ async def adas_preview_catalog_export(
     the closure pulled in before you fetch a bundle that can run to hundreds of
     kilobytes.
 
-    `components` lists the objects to export as `{"type": "table" | "pipeline",
-    "name": "..."}`. Omitted or empty, it means **everything exportable**: every
-    ACTIVE user table and every pipeline that reads no OTLP landing table.
-
+    Everything exportable means every ACTIVE user table and every pipeline that
+    reads no OTLP landing table.
+    {args}
     The closure runs in both directions: a table pulls in its `source_table`
     and every pipeline that targets it; a pipeline pulls in its inputs and its
     target; both pull in every enrichment a pipeline reads, including one named
     only as an `"<enrichment>.<column>"` token inside a filter or measure.
 
-    Returns: `{objects: [...], required_system_tables: [...], skipped: [...]}`.
+    Returns: `{objects: [...], required_system_tables: [...], skipped: [...],
+      access: [...]}`.
       `objects` holds the tables and pipelines, in dependency order, each
       `{type, name, description, reason}`; `reason` is `selected` or the dependency
-      that pulled the object in (e.g. `source_table of usage_sentiment`).
+      that pulled the object in (e.g. `source_table of usage_sentiment`, or
+      `column policy of <table>` for an enrichment an access entry names). An
+      access-only table is not listed here, only under `access`.
       `required_system_tables` are the system tables the bundle would require on
-      the target rather than carry, each with the `reason` it is needed. `skipped` lists what an export of everything leaves out, with
+      the target rather than carry, each with the `reason` it is needed (`access`
+      when only exporting everything with access covers it). `skipped` lists
+      what an export of everything leaves out, with
       `reason` `otlp`, `pending`, `failed`, `unresolvable` or
       `dependency_skipped`.
+      `access` is present with `include_access` only: one `{table, roles,
+      left_behind}` per table that carries access or leaves some behind, where
+      `left_behind` holds each `{role, entry, error}` that will not travel. Read
+      it before promoting: neither the bundle nor the import mentions it.
 
     Errors (ADAS's own code is in `details.error`):
       - `not_found` (404) — a named table that does not exist or that the
         caller may not get (`not_found`), or a named pipeline that does not
         exist (`unknown_pipeline`).
       - `invalid_argument` (422 `catalog_export_invalid`) — a selection that
-        names, or whose closure reaches, a system table, an OTLP landing table
-        or a pipeline reading one, or a PENDING or FAILED table.
+        names a system table without `include_access`, or that names, or whose
+        closure reaches, an OTLP landing table or a pipeline reading one, or a
+        PENDING or FAILED table. An access-only table and a pipeline exported
+        with `dependencies: false` walk no closure, so they are exempt. A
+        closure that reaches a system table is not an error: the table is
+        listed under `required_system_tables`.
       - `permission_denied` (403 `column_not_entitled`) — a bundle table has
         a column a column policy hides from the caller (checked first, so it
         wins); (403 `sensitive_column_not_entitled`) — a bundle table has a
         sensitive column the caller may not see. Columns are never silently
         dropped. Exporting everything includes the enrichments of every
         source the caller may get, so either can come from one of those.
+      - `permission_denied` (403 `forbidden`) — `include_access` without
+        `TABLE_GRANT`.
+      - `invalid_argument` (422 `catalog_export_empty`) — an access-only table
+        with no entry the export can carry.
 
     Related: adas_export_catalog, adas_preview_catalog_import.
 
@@ -122,9 +196,12 @@ async def adas_preview_catalog_export(
       (no arguments — preview an export of everything)
       components=[{"type": "table", "name": "usage_sentiment"}]
       components=[{"type": "pipeline", "name": "turns_rollup"}, {"type": "table", "name": "turns"}]
+      components=[{"type": "pipeline", "name": "sentiment_enrich", "dependencies": False}]
+      include_access=True
+      components=[{"type": "table", "name": "usage_base", "access_only": True, "roles": ["analytics-viewers"]}], include_access=True
     """
 
-    body = _export_body(components)
+    body = _export_body(components, include_access)
     if "error" in body:
         return body
     try:
@@ -136,28 +213,32 @@ async def adas_preview_catalog_export(
 
 
 async def adas_export_catalog(
-    ctx: Context, components: list[dict[str, Any]] | None = None
+    ctx: Context,
+    components: list[dict[str, Any]] | None = None,
+    include_access: bool = False,
 ) -> dict[str, Any]:
     """Export a catalog bundle: the selected tables and pipelines with their dependency closure.
 
     **Writes nothing.** The selection and the closure are exactly those of
     `adas_preview_catalog_export`; preview first when you are not sure what the
     closure will add. Omitted or empty `components` exports everything
-    exportable — about 200 KB on a real environment — so select what you mean
+    exportable, which can run to hundreds of kilobytes, so select what you mean
     to promote.
-
+    {args}
     The returned bundle is meant to be passed **unchanged** as `bundle` to
     `adas_preview_catalog_import` / `adas_import_catalog` on the target
     environment. ADAS binds it strictly: an unknown or misspelled member at any
     depth is a 400, so do not add, rename or annotate fields. Edit only values
     you mean to change.
 
-    Bundle shape (`format: "adas-catalog"`, `format_version: 3`; version 3
-    adds a transform's `route` and `advanced.input_token_budget`, and an
-    older ADAS refuses it with `catalog_bundle_version_unsupported`, while
-    version 1 and 2 bundles still import here):
+    Bundle shape (`format: "adas-catalog"`, `format_version: 4`; version 4
+    adds the `access` member, version 3 a transform's `route` and
+    `advanced.input_token_budget`. An older ADAS refuses a newer version with
+    `catalog_bundle_version_unsupported`, while version 1 to 3 bundles still
+    import here):
       - `tables[]` — `{table, schema}` in request shape. Columns travel
-        exactly as stored, provenance columns included. No grants. An
+        exactly as stored, provenance columns included. No grants (those
+        travel under `access`). An
         enrichment ADAS laid out aligned travels without `partition_by`, its
         hidden alignment column or `layout`: import's define-schema re-derives
         the layout from the target's source (an adopted, visible alignment
@@ -167,8 +248,16 @@ async def adas_export_catalog(
         `exported_enabled` is informational; import always creates the
         pipeline disabled.
       - `required_system_tables[]` — the names of the system tables the closure
-        reaches, e.g. `["dial_usage_log"]`. Import checks they exist and never
-        writes them.
+        reaches, the selection names, or whose access the bundle carries, e.g.
+        `["dial_usage_log"]`. A pipeline exported with `dependencies: false`
+        brings none in. Import checks they exist and never changes their
+        definition.
+      - `access` — with `include_access` only: `{table: {role: {privileges,
+        rows, columns}}}`, in the shape `GET /v1/tables/{name}/access` returns
+        one role's entry. A table key the bundle does not carry must exist on
+        the target. Imported only with `include_access`, ignored otherwise.
+        Treat a bundle carrying it as access configuration: it says which roles
+        may read what.
       - `skipped[]` and `exported_at`.
 
     A bundle imports into the same or a newer ADAS; an older one refuses a
@@ -182,9 +271,12 @@ async def adas_export_catalog(
     Examples:
       components=[{"type": "table", "name": "usage_sentiment"}]
       components=[{"type": "pipeline", "name": "turns_rollup"}]
+      components=[{"type": "pipeline", "name": "sentiment_enrich", "dependencies": False}]
+      components=[{"type": "table", "name": "usage_sentiment"}], include_access=True
+      components=[{"type": "table", "name": "dial_usage_log"}], include_access=True
     """
 
-    body = _export_body(components)
+    body = _export_body(components, include_access)
     if "error" in body:
         return body
     try:
@@ -199,13 +291,14 @@ def _import_request(
     bundle: dict[str, Any],
     resolution_policy: str,
     acknowledge_reused_names: bool,
+    include_access: bool,
 ) -> tuple[tuple[dict[str, Any], dict[str, Any]] | None, dict[str, Any] | None]:
     """Validate the import arguments and build the multipart part and query.
 
     Returns `((files, params), None)` on success or `(None, error_envelope)`.
     The bundle is re-serialized as the only part, `file`; both options are
-    query parameters. `acknowledge_reused_names` is sent only when true, since
-    ADAS defaults it to false.
+    query parameters. `acknowledge_reused_names` and `include_access` are sent
+    only when true, since ADAS defaults both to false.
     """
 
     if not isinstance(bundle, dict) or not bundle:
@@ -222,6 +315,8 @@ def _import_request(
     params: dict[str, Any] = {"resolution_policy": resolution_policy}
     if acknowledge_reused_names:
         params["acknowledge_reused_names"] = "true"
+    if include_access:
+        params["include_access"] = "true"
     return (files, params), None
 
 
@@ -239,7 +334,10 @@ _IMPORT_ARGS_DOC = """
             Re-running a bundle after a partial failure under this policy
             converges.
           - `OVERWRITE` — refused (422 `resolution_policy_unsupported`):
-            import never changes an existing object.
+            import never changes an existing object's definition, columns or
+            pipeline.
+        An existing access entry never conflicts: with `include_access`, the
+        bundle's entries are written under either policy.
       - `acknowledge_reused_names` — optional, default false; accept creating a
         pipeline whose
         name the target once used for a pipeline that was enabled and then
@@ -248,6 +346,15 @@ _IMPORT_ARGS_DOC = """
         resumes from the old cursor against an empty target and silently skips
         history. Without it such a bundle is refused; the preview flags the
         entry `reused_name: true`.
+      - `include_access` — optional, default false; also write the bundle's
+        `access` entries, per role, onto created, existing and system tables
+        alike, never removing one. Needs global `TABLE_GRANT` (and still
+        `TABLE_CREATE`, even for a bundle that carries only access). Without it
+        the bundle's `access` member is ignored. A bundle exported without
+        `include_access` has no `access` member, and importing it with
+        `include_access` is a `validation_errors` problem (422
+        `catalog_import_invalid` on the import itself). To edit an entry, call
+        `adas_describe_schema` with `type_name="BundleAccessEntry"`.
 
     Each entry under `tables` and `pipelines` is
     `{name, import_action, prev, next, differs, metadata_only, problems[]}`:
@@ -270,6 +377,16 @@ _IMPORT_ARGS_DOC = """
     Each entry under `required_system_tables` is `{name, import_action,
     problems[]}`: `SKIP` when the target has it as an ACTIVE system table,
     `FAIL` otherwise.
+    With `include_access`, each entry under `access` is one table and role:
+    `{table, role, import_action, prev, next, problems[], ineffective_grants[]}`,
+    where `import_action` is `CREATE` (the target has no entry for the role),
+    `REPLACE` (it has a different one), `SKIP` (an equal one) or `FAIL` (read
+    `problems`). Review every role name and row-policy literal: they are copied
+    as they are and may mean another group, or nobody, here. Review every
+    `REPLACE` whose `prev` holds something its `next` drops: replacing it can
+    widen reads. While a preview with access runs it locks the tables whose
+    access it would change, so a concurrent access write waits and may answer
+    409 `table_busy`.
     The top level carries `env_specific[]`: values that usually differ between
     environments (`transform.model`, `advanced.rate_rpm`, cron triggers,
     absolute date literals in filters, table `ttl`). **Nothing checks `transform.model`
@@ -282,6 +399,7 @@ async def adas_preview_catalog_import(
     bundle: dict[str, Any],
     resolution_policy: str,
     acknowledge_reused_names: bool = False,
+    include_access: bool = False,
 ) -> dict[str, Any]:
     """Validate a catalog bundle against this environment and report what an import would do.
 
@@ -292,15 +410,17 @@ async def adas_preview_catalog_import(
 
     Unlike the import, it answers **200 whenever the bundle parses**, problems
     included: read `import_action`, `problems` and `validation_errors` (bundle
-    level: limits, a name listed twice) rather than relying on an error.
+    level: limits, a name listed twice, and with `include_access` the bundle's
+    `access` member) rather than relying on an error.
     {args}
     Returns: `{required_system_tables: [...], tables: [...], pipelines: [...],
-      env_specific: [...], validation_errors: [...]}`.
+      access: [...], env_specific: [...], validation_errors: [...]}` (`access`
+      is empty without `include_access`).
       Errors are about the request itself: `invalid_argument` 400 (malformed
-      bundle, unknown field — a bundle carrying `access` included — or a
-      missing `resolution_policy`),
+      bundle, unknown field, or a missing `resolution_policy`),
       422 `catalog_bundle_version_unsupported` (a bundle from a newer ADAS) or
-      `resolution_policy_unsupported`, `permission_denied` 403, and
+      `resolution_policy_unsupported`, `permission_denied` 403 (`forbidden`
+      naming `TABLE_GRANT` for `include_access` without it), and
       `http_error` 413 `payload_too_large` (over `CATALOG_IMPORT_MAX_FILE_SIZE`,
       20 MB by default).
 
@@ -309,10 +429,11 @@ async def adas_preview_catalog_import(
     Examples:
       bundle={...}, resolution_policy="SKIP_IF_EXISTS"
       bundle={...}, resolution_policy="FAIL_IF_EXISTS"
+      bundle={...}, resolution_policy="SKIP_IF_EXISTS", include_access=True
     """
 
     request, error = _import_request(
-        bundle, resolution_policy, acknowledge_reused_names
+        bundle, resolution_policy, acknowledge_reused_names, include_access
     )
     if error:
         return error
@@ -335,15 +456,18 @@ async def adas_import_catalog(
     bundle: dict[str, Any],
     resolution_policy: str,
     acknowledge_reused_names: bool = False,
+    include_access: bool = False,
 ) -> dict[str, Any]:
-    """Import a catalog bundle: create its tables and pipelines on this environment, without grants.
+    """Import a catalog bundle: create its tables and pipelines on this environment, and optionally its access.
 
     **Writes.** Runs the same validation pass as `adas_preview_catalog_import`
     and, only if it finds no problem, creates each object in dependency order
     as its own step: source tables, then enrichment tables, then `enrich`
-    pipelines, then `aggregate` ones. **Every table is created with no grants**
-    and **every pipeline disabled**, whatever `exported_enabled` says. Preview
-    first, with the same arguments.
+    pipelines, then `aggregate` ones. **Every pipeline is created disabled**,
+    whatever `exported_enabled` says. **Without `include_access` every table is
+    created with no grants**; with it, the bundle's access entries are written
+    last, in one transaction, so they land whole or not at all. Preview first,
+    with the same arguments.
 
     If an object fails part-way, the import deletes again what it created, in
     reverse order. That is best effort: `outcome` says whether it worked, and
@@ -352,8 +476,8 @@ async def adas_import_catalog(
     {args}
     After a successful import (ADAS's `docs/catalog-promotion.md`):
       1. review `env_specific` — a model must exist on the target;
-      2. grant access on each imported source table with this environment's
-         role names (`PUT /v1/tables/{name}/access?role={role}`, not wrapped
+      2. without `include_access`, grant access on each imported source table
+         with this environment's role names (`PUT /v1/tables/{name}/access?role={role}`, not wrapped
          here) — until then only callers holding the global privileges can see
          the tables. An enrichment follows its source's read access; grant it
          only `write`/`modify`. Allow each `dial_app_route` pipeline's pair
@@ -365,17 +489,21 @@ async def adas_import_catalog(
          filter-matching rows), and run any data-sync backfill separately —
          runner state does not travel.
 
-    Returns: the entries above plus `import_id`, `outcome` (`completed`,
-      `rolled_back`, `rollback_failed`) and per entry a `status` (`created`,
-      `skipped`, `rolled_back`, `rollback_failed`, `failed`). A mid-apply
-      failure is still a 200 — read `outcome`.
+    Returns: the entries above plus `import_id`, `outcome` (`completed`;
+      `rolled_back` when an object or the access step failed and what this
+      import created was deleted again; `rollback_failed` when some of it could
+      not be) and per entry a `status` (`created`, `skipped`, `rolled_back`,
+      `rollback_failed`, `failed`; an `access` entry reports `created`,
+      `replaced`, `skipped` or `rolled_back`). A mid-apply failure is still a
+      200 — read `outcome`.
       Errors (nothing written): `conflict` 409 `catalog_import_conflict` (an
       object exists under `FAIL_IF_EXISTS`); `invalid_argument` 422
       `catalog_import_invalid` (the validation pass found a problem — the
       message is a summary, call `adas_preview_catalog_import` for the
       details), 422 `catalog_bundle_version_unsupported` or
       `resolution_policy_unsupported`, or 400 for a malformed request;
-      `permission_denied` 403; `http_error` 413 `payload_too_large`.
+      `permission_denied` 403 (`forbidden` naming `TABLE_GRANT` for
+      `include_access` without it); `http_error` 413 `payload_too_large`.
 
     Related: adas_preview_catalog_import, adas_export_catalog,
       adas_patch_pipeline, adas_preview_pipeline.
@@ -384,10 +512,11 @@ async def adas_import_catalog(
       bundle={...}, resolution_policy="SKIP_IF_EXISTS"
       bundle={...}, resolution_policy="FAIL_IF_EXISTS"
       bundle={...}, resolution_policy="SKIP_IF_EXISTS", acknowledge_reused_names=True
+      bundle={...}, resolution_policy="SKIP_IF_EXISTS", include_access=True
     """
 
     request, error = _import_request(
-        bundle, resolution_policy, acknowledge_reused_names
+        bundle, resolution_policy, acknowledge_reused_names, include_access
     )
     if error:
         return error
@@ -405,13 +534,17 @@ async def adas_import_catalog(
         return structured_error("unauthenticated", str(exc))
 
 
-# The two import docstrings share their argument and entry description.
+# Each export/import pair shares its argument description.
 # Docstrings are dedented at compile time from Python 3.13 on and not before, so
 # both sides are normalized with cleandoc before the section is spliced in.
-for _tool in (adas_preview_catalog_import, adas_import_catalog):
-    _tool.__doc__ = inspect.cleandoc(_tool.__doc__).replace(
-        "{args}", "\n" + inspect.cleandoc(_IMPORT_ARGS_DOC) + "\n"
-    )
+for _tools, _args in (
+    ((adas_preview_catalog_export, adas_export_catalog), _EXPORT_ARGS_DOC),
+    ((adas_preview_catalog_import, adas_import_catalog), _IMPORT_ARGS_DOC),
+):
+    for _tool in _tools:
+        _tool.__doc__ = inspect.cleandoc(_tool.__doc__).replace(
+            "{args}", "\n" + inspect.cleandoc(_args) + "\n"
+        )
 
 
 def register(mcp: FastMCP) -> None:

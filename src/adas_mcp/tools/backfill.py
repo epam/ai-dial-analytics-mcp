@@ -3,8 +3,8 @@
 What a run failed to ingest is recorded in the durable failure ledger
 (`tools/sync_failures.py`), not only in the run's in-memory status.
 
-The two reads (`GET /{runId}` and the bare `GET` listing) are open to any
-caller; the trigger is `FULL_ADMIN` on the backend and registers behind
+The two reads (`GET /{runId}` and the bare `GET` listing) need `REGISTRY_READ`
+on the backend; the trigger needs `DATA_SYNC_OPERATE` and registers behind
 `ADAS_CAPABILITIES=full` here.
 """
 

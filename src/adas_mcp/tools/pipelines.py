@@ -17,20 +17,26 @@ An `enrich` pipeline carries the whole definition of what it computes in its
 own nested `transform` block; there is no separate registry to name or read,
 so a definition is read from its pipeline.
 
-**Every** `/v1/pipelines` endpoint — the GETs included — is
-`FULL_ADMIN` on the backend: declaring a pipeline means declaring what a table
-people read as fact will contain, and reading one means reading a declaration
-that names the columns it reads, `sensitive` ones included. The reads still
-register under `limited` — the
-capability toggle is a local guardrail, not the authorization; under
-`SECURITY_MODE=oidc` a non-admin caller gets `permission_denied`.
+**Every** wrapped `/v1/pipelines` endpoint — the GETs included — needs a
+registry privilege on the backend: `REGISTRY_READ` for the reads,
+`REGISTRY_ADMIN` for create, patch, preview and refresh (`FULL_ADMIN` holds
+both). Declaring a pipeline means declaring what a table people read as fact
+will contain, and reading one means reading a declaration that names the
+columns it reads, `sensitive` ones included. The reads still register under
+`limited` — the capability toggle is a local guardrail, not the authorization;
+under `SECURITY_MODE=oidc` a caller without the privilege gets
+`permission_denied`.
 
 The pipeline *data plane* (`POST /v1/pipelines/{name}/scan`, `/group-rows`,
 `/materialize`, `/rows`) is deliberately not wrapped: it is the Enrichment
 Runner's machine-to-machine API — cursor paging and batched row write-back —
-not an agent-facing surface. Those four paths are the only `/v1/pipelines`
-endpoints reachable without `FULL_ADMIN`, by any identity holding the target
-enrichment's WRITE grant. Constraints there worth knowing even unwrapped: the
+not an agent-facing surface. Those four paths are authorized per call against
+the tables they touch (a matching table grant suffices) rather than by a
+registry privilege, and, like `POST /v1/pipelines/{name}/trial-input` (the
+runner's dry-run read, also not wrapped), they require the runner's
+`Adas-Contract-Version` header: absent is 409 `runner_contract_required`,
+different is 409 `runner_contract_mismatch`. Constraints there worth knowing
+even unwrapped: the
 two *writing* paths, `/rows` and `/materialize`, refuse a **disabled** pipeline
 with **409** `pipeline_conflict` (a disabled pipeline writes to its target by no
 route); `/scan` and `/group-rows` stay open to a disabled pipeline but, like the
